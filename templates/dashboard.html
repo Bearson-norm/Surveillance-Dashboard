@@ -1,0 +1,702 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Foomstore Crowd Customer Traffic Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1.3.1"></script>
+    <script src="https://cdn.jsdelivr.net/npm/luxon@3.3.0/build/global/luxon.min.js"></script>
+    <style>
+        :root {
+            --slate-900: #0f172a; --slate-800: #1e293b; --slate-700: #334152;
+            --slate-600: #475569; --slate-400: #94a3b8; --slate-300: #cbd5e1;
+            --purple-500: #8b5cf6; --blue-400: #60a5fa; --green-400: #4ade80;
+            --orange-400: #fb923c; --red-400: #f87171; --yellow-400: #facc15;
+            --pink-400: #f472b6; --indigo-400: #818cf8; --teal-400: #2dd4bf;
+            --white: #ffffff;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+            background: var(--slate-900); color: var(--slate-300);
+            min-height: 100vh;
+        }
+        .dashboard { max-width: 1400px; margin: 0 auto; padding: 1.5rem; }
+        .header { margin-bottom: 2rem; }
+        .header .title h1 { font-size: 2.25rem; font-weight: 700; color: var(--white); margin-bottom: 0.5rem; }
+        .header .title p { color: var(--slate-400); }
+        .header .time-display { text-align: right; }
+        .header .time-display .time { font-family: monospace; font-size: 1.25rem; color: var(--white); }
+        .header .time-display .date { font-size: 0.875rem; color: var(--slate-400); }
+        .stats-grid {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1rem; margin-bottom: 2rem;
+        }
+        .stat-card {
+            background-color: rgba(224, 226, 230, 0.5); backdrop-filter: blur(4px);
+            border-radius: 0.75rem; padding: 1.5rem; border: 1px solid var(--slate-700);
+            text-align: center;
+        }
+        .stat-card .value {
+            font-size: 2rem; font-weight: 700; color: var(--white); margin-bottom: 0.5rem;
+        }
+        .stat-card .label { color: var(--slate-400); font-size: 0.875rem; }
+        .card {
+            background-color: rgba(224, 226, 230, 0.5); backdrop-filter: blur(4px);
+            border-radius: 0.75rem; padding: 1.5rem; border: 1px solid var(--slate-700);
+            margin-bottom: 2rem;
+        }
+        .card-title { font-size: 1.25rem; font-weight: 600; color: var(--white); margin-bottom: 1.5rem; }
+        .card-controls { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; }
+        .card-controls select, .card-controls input, .card-controls button {
+            background-color: var(--slate-700); color: var(--white);
+            padding: 0.5rem 1rem; border-radius: 0.5rem; border: 1px solid var(--slate-600);
+            cursor: pointer; font-size: 0.875rem;
+        }
+        .card-controls button.active {
+            background-color: var(--purple-500); border-color: var(--purple-500); font-weight: 500;
+        }
+        .card-controls input:focus, .card-controls select:focus {
+            outline: none; border-color: var(--purple-500); box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.2);
+        }
+        .date-range-container {
+            display: flex; gap: 0.5rem; align-items: center;
+        }
+        .date-range-container label {
+            color: var(--slate-400); font-size: 0.875rem; white-space: nowrap;
+        }
+        .refresh-btn {
+            background-color: var(--green-400) !important; color: var(--slate-900) !important;
+            border-color: var(--green-400) !important; font-weight: 500;
+        }
+        .refresh-btn:hover {
+            background-color: #22c55e !important;
+        }
+        .table-container { overflow-x: auto; max-height: 500px; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 0.75rem 1rem; text-align: left; white-space: nowrap; }
+        thead th { color: var(--slate-400); font-weight: 500; border-bottom: 1px solid var(--slate-700); position: sticky; top: 0; background-color: rgba(30, 41, 59, 0.8); backdrop-filter: blur(4px); }
+        tbody tr { border-bottom: 1px solid rgba(51, 65, 82, 0.5); }
+        tbody tr:hover { background-color: rgba(239, 242, 245, 0.25); }
+        .total-badge {
+            display: inline-flex; align-items: center; justify-content: center;
+            background-color: rgba(32, 37, 43, 0.2); color: var(--blue-400);
+            padding: 0.25rem 0.5rem; border-radius: 99px; font-weight: 500;
+            min-width: 30px;
+        }
+        .chart-container { height: 320px; position: relative; }
+        .card-footer { margin-top: 1rem; font-size: 0.875rem; color: var(--slate-400); }
+        .flex-between { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;}
+        .loading { text-align: center; color: var(--slate-400); padding: 2rem; }
+        .error { color: var(--red-400); text-align: center; padding: 1rem; }
+        .status-indicator {
+            display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+            background-color: var(--green-400); margin-right: 0.5rem;
+            animation: pulse 2s infinite;
+        }
+        .status-indicator.disconnected { 
+            background-color: var(--red-400);
+            animation: none;
+        }
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+        .store-legend {
+            display: flex; flex-wrap: wrap; gap: 1rem; margin-bottom: 1rem;
+            padding: 1rem; background-color: rgba(30, 41, 59, 0.3); border-radius: 0.5rem;
+        }
+        .store-legend-item {
+            display: flex; align-items: center; gap: 0.5rem;
+        }
+        .store-color {
+            width: 12px; height: 12px; border-radius: 2px;
+        }
+        .store-name {
+            font-size: 0.875rem; color: var(--slate-300);
+        }
+        .logo-container {
+            display: flex; align-items: center; gap: 1rem;
+        }
+        .foom-logo {
+            height: 40px; width: auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="dashboard">
+        <header class="header">
+            <div class="flex-between">
+                <div class="title">
+                    <h1>Foomstore Crowd Customer Traffic Dashboard</h1>
+                    <p>
+                        <span class="status-indicator" id="connectionStatus"></span>
+                        Real-time Crowd Monitoring System
+                    </p>
+                </div>
+                <div class="logo-container">
+                    <!-- Ganti 'YOUR_BASE64_STRING_HERE' dengan string base64 logo Anda -->
+                    <!-- <img src="data:image/png;base64,YOUR_BASE64_STRING_HERE" 
+                         alt="Foom Logo" 
+                         class="foom-logo"
+                         style="filter: brightness(0) invert(1);"> -->
+                    <div class="time-display">
+                        <div id="currentTime" class="time"></div>
+                        <div id="currentDate" class="date"></div>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <main>
+            <!-- Statistics Cards -->
+            <div class="stats-grid" id="statsGrid">
+                <div class="stat-card">
+                    <div class="value" id="totalCustomers">0</div>
+                    <div class="label">Total Customers Today</div>
+                </div>
+                <div class="stat-card">
+                    <div class="value" id="activeStores">0</div>
+                    <div class="label">Active Stores</div>
+                </div>
+                <div class="stat-card">
+                    <div class="value" id="avgCustomers">0</div>
+                    <div class="label">Avg per Hour</div>
+                </div>
+                <div class="stat-card">
+                    <div class="value" id="peakHour">--:--</div>
+                    <div class="label">Peak Hour</div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="flex-between">
+                    <h3 class="card-title">Customer Trend Analysis</h3>
+                    <div class="card-controls" id="trendChartControls">
+                        <select id="trendStoreSelect">
+                            <option value="all">All Stores</option>
+                        </select>
+                        <div class="date-range-container">
+                            <label>From:</label>
+                            <input type="date" id="trendStartDate">
+                            <label>To:</label>
+                            <input type="date" id="trendEndDate">
+                        </div>
+                        <button class="active" data-view="hourly">Hourly</button>
+                        <button data-view="daily">Daily</button>
+                        <button data-view="weekly">Weekly</button>
+                        <button class="refresh-btn" id="refreshTrendBtn">Refresh</button>
+                    </div>
+                </div>
+                <div id="storeLegend" class="store-legend" style="display: none;"></div>
+                <div class="chart-container">
+                    <canvas id="combinedTrendChart"></canvas>
+                </div>
+                <div class="card-footer" id="trendChartInfo"></div>
+            </div>
+
+            <div class="card">
+                <div class="flex-between">
+                    <h3 class="card-title">Detailed Hourly Report</h3>
+                    <div class="card-controls">
+                        <input type="date" id="tableDateSelect">
+                        <select id="tableStoreSelect"></select>
+                        <button class="refresh-btn" id="refreshTableBtn">Refresh</button>
+                    </div>
+                </div>
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>No</th>
+                                <th>Time</th>
+                                <th>Camera Display</th>
+                                <th>Cashier Display</th>
+                                <th>Total Customer</th>
+                            </tr>
+                        </thead>
+                        <tbody id="hourlyTableBody"></tbody>
+                    </table>
+                </div>
+                <div class="card-footer" id="tableInfoFooter"></div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        // Dynamic color palette for unlimited stores
+        const COLOR_PALETTE = [
+            '#60a5fa', '#4ade80', '#fb923c', '#f87171', '#facc15',
+            '#f472b6', '#818cf8', '#2dd4bf', '#a78bfa', '#34d399',
+            '#fbbf24', '#f97316', '#ef4444', '#06b6d4', '#8b5cf6'
+        ];
+
+        let STORES = {}; // Will be populated dynamically
+        let combinedTrendChart;
+        let isConnected = false;
+        let lastDataUpdate = null;
+
+        // Generate a readable name from store ID
+        function generateStoreName(storeId) {
+            return storeId
+                .replace(/^Foom-Store-/i, '')
+                .replace(/-/g, ' ')
+                .replace(/\b\w/g, l => l.toUpperCase());
+        }
+
+        // Assign colors to stores dynamically
+        function assignStoreColor(index) {
+            return COLOR_PALETTE[index % COLOR_PALETTE.length];
+        }
+
+        async function fetchData(endpoint) {
+            try {
+                const response = await fetch(endpoint);
+                if (!response.ok) {
+                    throw new Error(`API Error: ${response.status} ${response.statusText}`);
+                }
+                const result = await response.json();
+                isConnected = true;
+                updateConnectionStatus();
+                return result;
+            } catch (error) {
+                console.error(`Failed to fetch from ${endpoint}:`, error);
+                isConnected = false;
+                updateConnectionStatus();
+                return { success: false, data: [], error: error.message };
+            }
+        }
+
+        function updateConnectionStatus() {
+            const statusIndicator = document.getElementById('connectionStatus');
+            if (isConnected) {
+                statusIndicator.classList.remove('disconnected');
+            } else {
+                statusIndicator.classList.add('disconnected');
+            }
+        }
+
+        async function loadAvailableStores() {
+            console.log('Loading available stores...');
+            const result = await fetchData('/api/stores');
+            
+            if (result.success && result.stores && result.stores.length > 0) {
+                // Reset STORES object
+                STORES = {};
+                
+                // Populate STORES with actual data from API
+                result.stores.forEach((store, index) => {
+                    STORES[store.gerai_id] = {
+                        name: generateStoreName(store.gerai_id),
+                        color: assignStoreColor(index),
+                        totalCustomers: store.total_customers || 0,
+                        recordCount: store.record_count || 0,
+                        lastRecord: store.last_record
+                    };
+                });
+                
+                console.log('Loaded stores:', STORES);
+                populateStoreSelectors();
+                updateStoreLegend();
+                return true;
+            } else {
+                // Fallback to hardcoded stores if API fails
+                console.warn('Failed to load stores from API, using fallback');
+                STORES = {
+                    "Foom-Store-Tebet": { name: "Tebet", color: "#60a5fa" },
+                    "Foom-Store-Kalibata": { name: "Kalibata", color: "#4ade80" },
+                    "Foom-Store-Cibis": { name: "Cibis", color: "#fb923c" },
+                    "Foom-Store-Basura": { name: "Basura", color: "#f87171" }
+                };
+                populateStoreSelectors();
+                updateStoreLegend();
+                return false;
+            }
+        }
+
+        function populateStoreSelectors() {
+            const trendStoreSelect = document.getElementById('trendStoreSelect');
+            const tableStoreSelect = document.getElementById('tableStoreSelect');
+            
+            // Clear existing options (keep "All Stores")
+            trendStoreSelect.innerHTML = '<option value="all">All Stores</option>';
+            tableStoreSelect.innerHTML = '';
+            
+            // Add stores to selectors
+            Object.keys(STORES).forEach(storeId => {
+                const store = STORES[storeId];
+                
+                // Trend selector
+                const option1 = document.createElement('option');
+                option1.value = storeId;
+                option1.textContent = `${store.name}${store.recordCount ? ` (${store.recordCount} records)` : ''}`;
+                trendStoreSelect.appendChild(option1);
+
+                // Table selector
+                const option2 = document.createElement('option');
+                option2.value = storeId;
+                option2.textContent = store.name;
+                tableStoreSelect.appendChild(option2);
+            });
+
+            // Set default to first store if available
+            const firstStore = Object.keys(STORES)[0];
+            if (firstStore) {
+                tableStoreSelect.value = firstStore;
+            }
+        }
+
+        function updateStoreLegend() {
+            const legendContainer = document.getElementById('storeLegend');
+            const selectedStore = document.getElementById('trendStoreSelect').value;
+            
+            if (selectedStore === 'all') {
+                legendContainer.style.display = 'flex';
+                legendContainer.innerHTML = '';
+                
+                Object.keys(STORES).forEach(storeId => {
+                    const store = STORES[storeId];
+                    const legendItem = document.createElement('div');
+                    legendItem.className = 'store-legend-item';
+                    legendItem.innerHTML = `
+                        <div class="store-color" style="background-color: ${store.color}"></div>
+                        <div class="store-name">${store.name}</div>
+                    `;
+                    legendContainer.appendChild(legendItem);
+                });
+            } else {
+                legendContainer.style.display = 'none';
+            }
+        }
+
+        async function updateStatistics() {
+            const today = new Date().toISOString().split('T')[0];
+            const result = await fetchData(`/api/statistics?start_date=${today}&end_date=${today}`);
+            
+            if (result.success && result.statistics) {
+                const stats = result.statistics;
+                document.getElementById('totalCustomers').textContent = stats.total_customers || 0;
+                document.getElementById('activeStores').textContent = stats.active_stores || 0;
+                document.getElementById('avgCustomers').textContent = stats.avg_customers || '0.0';
+                document.getElementById('peakHour').textContent = stats.peak_hour || '--:--';
+            }
+        }
+        
+        function createCharts() {
+            const chartOptions = {
+                maintainAspectRatio: false,
+                responsive: true,
+                interaction: {
+                    intersect: false,
+                    mode: 'index'
+                },
+                scales: {
+                    y: { 
+                        beginAtZero: true, 
+                        ticks: { 
+                            color: '#94a3b8',
+                            callback: function(value) {
+                                return Math.floor(value);
+                            }
+                        }, 
+                        grid: { color: '#334155' } 
+                    },
+                    x: { 
+                        ticks: { 
+                            color: '#94a3b8',
+                            maxTicksLimit: 12
+                        }, 
+                        grid: { color: '#1e293b' } 
+                    }
+                },
+                plugins: { 
+                    legend: { 
+                        display: false // Using custom legend instead
+                    },
+                    tooltip: {
+                        backgroundColor: 'rgba(30, 41, 59, 0.9)',
+                        titleColor: '#ffffff',
+                        bodyColor: '#cbd5e1',
+                        borderColor: '#475569',
+                        borderWidth: 1,
+                        callbacks: {
+                            title: function(tooltipItems) {
+                                return tooltipItems[0].label;
+                            },
+                            label: function(context) {
+                                const storeName = STORES[Object.keys(STORES)[context.datasetIndex]]?.name || 'Unknown';
+                                return `${storeName}: ${context.parsed.y} customers`;
+                            }
+                        }
+                    }
+                }
+            };
+            
+            combinedTrendChart = new Chart(document.getElementById('combinedTrendChart'), {
+                type: 'line',
+                data: { labels: [], datasets: [] },
+                options: chartOptions
+            });
+        }
+
+        function updateDateTime() {
+            const now = luxon.DateTime.now();
+            document.getElementById('currentTime').textContent = now.toFormat('HH:mm:ss');
+            document.getElementById('currentDate').textContent = now.toFormat('cccc, LLLL dd, yyyy');
+        }
+
+        function formatDateForChart(dateString, viewType) {
+            const dt = luxon.DateTime.fromISO(dateString);
+            switch(viewType) {
+                case 'hourly':
+                    return dt.toFormat('HH:mm');
+                case 'daily':
+                    return dt.toFormat('MMM dd');
+                case 'weekly':
+                    return dt.toFormat('MMM dd');
+                default:
+                    return dt.toFormat('MMM dd HH:mm');
+            }
+        }
+
+        async function updateCombinedTrendChart() {
+            const controls = document.getElementById('trendChartControls');
+            const viewType = controls.querySelector('button.active').dataset.view;
+            const selectedStore = document.getElementById('trendStoreSelect').value;
+            const startDate = document.getElementById('trendStartDate').value;
+            const endDate = document.getElementById('trendEndDate').value;
+            const infoDiv = document.getElementById('trendChartInfo');
+
+            // Show loading state
+            combinedTrendChart.data = { labels: [], datasets: [] };
+            combinedTrendChart.update();
+            infoDiv.innerHTML = '<span class="loading">Loading chart data...</span>';
+
+            // Update legend visibility
+            updateStoreLegend();
+
+            const storesToShow = selectedStore === 'all' ? Object.keys(STORES) : [selectedStore];
+            
+            // Build API URL with date filters
+            let apiUrl = `/api/chart-data?view_type=${viewType}&store_id=${selectedStore}`;
+            if (startDate) apiUrl += `&start_date=${startDate}`;
+            if (endDate) apiUrl += `&end_date=${endDate}`;
+            
+            console.log('Fetching chart data from:', apiUrl);
+            const result = await fetchData(apiUrl);
+            
+            if (!result.success || !result.data || result.data.length === 0) {
+                infoDiv.innerHTML = '<span class="error">No data available for the selected date range and filters.</span>';
+                return;
+            }
+
+            const apiData = result.data;
+
+            // Process data for the chart
+            const aggregatedData = {};
+            const allLabels = new Set();
+
+            apiData.forEach(item => {
+                const key = item.hour || item.day || item.week;
+                if (key) {
+                    allLabels.add(key);
+                    if (!aggregatedData[key]) {
+                        aggregatedData[key] = {};
+                    }
+                    aggregatedData[key][item.gerai_id] = item.total_customers || 0;
+                }
+            });
+
+            const sortedLabels = Array.from(allLabels).sort();
+            const datasets = [];
+
+            storesToShow.forEach((storeId, index) => {
+                const storeInfo = STORES[storeId];
+                if (storeInfo) {
+                    const dataPoints = sortedLabels.map(label => 
+                        (aggregatedData[label] && aggregatedData[label][storeId]) || 0
+                    );
+                    
+                    datasets.push({
+                        label: storeInfo.name,
+                        data: dataPoints,
+                        borderColor: storeInfo.color,
+                        backgroundColor: storeInfo.color + '33',
+                        fill: false,
+                        tension: 0.3,
+                        pointRadius: 3,
+                        pointHoverRadius: 5
+                    });
+                }
+            });
+            
+            // Format labels for display
+            const formattedLabels = sortedLabels.map(label => formatDateForChart(label, viewType));
+            
+            combinedTrendChart.data = {
+                labels: formattedLabels,
+                datasets: datasets
+            };
+            combinedTrendChart.update();
+
+            // Update info footer
+            const totalRecords = apiData.length;
+            const dateRange = startDate && endDate ? 
+                `${luxon.DateTime.fromISO(startDate).toFormat('dd MMM yyyy')} - ${luxon.DateTime.fromISO(endDate).toFormat('dd MMM yyyy')}` :
+                'All available data';
+            
+            infoDiv.textContent = `Showing ${totalRecords} data points for ${dateRange} (${viewType} view)`;
+            lastDataUpdate = new Date();
+        }
+
+        async function updateHourlyDetectionTable() {
+            const date = document.getElementById('tableDateSelect').value;
+            const storeId = document.getElementById('tableStoreSelect').value;
+            const tableBody = document.getElementById('hourlyTableBody');
+            const tableInfoFooter = document.getElementById('tableInfoFooter');
+            
+            tableBody.innerHTML = '<tr><td colspan="5" class="loading">Loading...</td></tr>';
+            
+            let apiUrl = `/api/chart-data?view_type=hourly&store_id=${storeId}`;
+            if (date) apiUrl += `&start_date=${date}&end_date=${date}`;
+            
+            console.log('Fetching table data from:', apiUrl);
+            const result = await fetchData(apiUrl);
+            
+            if (!result.success) {
+                tableBody.innerHTML = '<tr><td colspan="5" class="error">Failed to load data</td></tr>';
+                return;
+            }
+
+            const apiData = result.data || [];
+            
+            const dataMap = new Map();
+            apiData.forEach(item => {
+                if (item.hour) {
+                    try {
+                        const timestamp = luxon.DateTime.fromISO(item.hour);
+                        const hour = timestamp.hour;
+                        
+                        if (!dataMap.has(hour)) {
+                            dataMap.set(hour, { cam1: 0, cam2: 0, total: 0 });
+                        }
+                        
+                        const existing = dataMap.get(hour);
+                        dataMap.set(hour, {
+                            cam1: existing.cam1 + (item.total_kamera_1 || 0),
+                            cam2: existing.cam2 + (item.total_kamera_2 || 0),
+                            total: existing.total + (item.total_customers || 0)
+                        });
+                    } catch (e) {
+                        console.warn('Error processing hour data:', item, e);
+                    }
+                }
+            });
+
+            let tableHTML = '';
+            let totalCustomers = 0;
+            
+            for (let i = 0; i < 24; i++) {
+                const hourData = dataMap.get(i) || { cam1: 0, cam2: 0, total: 0 };
+                totalCustomers += hourData.total;
+                const timeRange = `${String(i).padStart(2, '0')}:00 - ${String((i + 1) % 24).padStart(2, '0')}:00`;
+
+                tableHTML += `
+                    <tr>
+                        <td>${i + 1}</td>
+                        <td>${timeRange}</td>
+                        <td>${hourData.cam1}</td>
+                        <td>${hourData.cam2}</td>
+                        <td><span class="total-badge">${hourData.total}</span></td>
+                    </tr>
+                `;
+            }
+            
+            if (tableHTML === '') {
+                tableHTML = '<tr><td colspan="5" class="error">No data available for the selected date and store.</td></tr>';
+            }
+            
+            tableBody.innerHTML = tableHTML;
+
+            const storeName = STORES[storeId]?.name || 'Unknown Store';
+            const formattedDate = date ? 
+                luxon.DateTime.fromISO(date).toFormat('dd LLLL yyyy') : 
+                'All dates';
+            
+            tableInfoFooter.textContent = `Showing data for: ${storeName} on ${formattedDate} (Total customers: ${totalCustomers})`;
+        }
+
+        function setDefaultDates() {
+            const today = new Date().toISOString().split('T')[0];
+            
+            // Set trend chart dates (last 7 days)
+            const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+            document.getElementById('trendStartDate').value = weekAgo;
+            document.getElementById('trendEndDate').value = today;
+            
+            // Set table date to today
+            document.getElementById('tableDateSelect').value = today;
+        }
+
+        async function refreshData() {
+            await loadAvailableStores();
+            await updateStatistics();
+            await updateCombinedTrendChart();
+            await updateHourlyDetectionTable();
+        }
+
+        // --- Initialization ---
+        document.addEventListener('DOMContentLoaded', async () => {
+            console.log('Dashboard initializing...');
+            
+            setDefaultDates();
+            createCharts();
+            updateDateTime();
+            
+            // Load stores and initialize dashboard
+            const storesLoaded = await loadAvailableStores();
+            if (storesLoaded) {
+                console.log('Stores loaded successfully');
+            }
+            
+            await updateStatistics();
+            await updateCombinedTrendChart();
+            await updateHourlyDetectionTable();
+
+            // Update time every second
+            setInterval(updateDateTime, 1000);
+            
+            // Auto-refresh data every 5 minutes
+            setInterval(refreshData, 5 * 60 * 1000);
+
+            // Event Listeners
+            document.getElementById('tableDateSelect').addEventListener('change', updateHourlyDetectionTable);
+            document.getElementById('tableStoreSelect').addEventListener('change', updateHourlyDetectionTable);
+            document.getElementById('refreshTableBtn').addEventListener('click', updateHourlyDetectionTable);
+            document.getElementById('refreshTrendBtn').addEventListener('click', () => {
+                updateCombinedTrendChart();
+                updateStatistics();
+            });
+            
+            // Date change listeners for trend chart
+            document.getElementById('trendStartDate').addEventListener('change', updateCombinedTrendChart);
+            document.getElementById('trendEndDate').addEventListener('change', updateCombinedTrendChart);
+            
+            const trendControls = document.getElementById('trendChartControls');
+            trendControls.addEventListener('click', (e) => {
+                if (e.target.tagName === 'BUTTON' && e.target.dataset.view) {
+                    trendControls.querySelectorAll('button[data-view]').forEach(btn => btn.classList.remove('active'));
+                    e.target.classList.add('active');
+                    updateCombinedTrendChart();
+                }
+            });
+            
+            document.getElementById('trendStoreSelect').addEventListener('change', updateCombinedTrendChart);
+
+            console.log('Dashboard initialized successfully');
+        });
+    </script>
+</body>
+</html>
